@@ -2,54 +2,51 @@ import type { AgentAction, AgentActionResponse, AgentRequest, CritiqueMode, Idea
 import { uid } from '../types/graph';
 import { localGenerate, localMerge, localExpand, localCritique } from './localAgentEngine';
 
-export const META_BASE_URL = 'https://api.meta.ai/v1';
-export const META_MODELS = ['muse-spark-1.3', 'muse-wonder-1.0', 'muse-ember-1.0'] as const;
-export const DEFAULT_META_MODEL = 'muse-spark-1.3';
+/* ---------- plain-language engine names (no model codes in the UI) ---------- */
 
-const KEY_STORE = 'auracanvas_meta_key';
-const MODEL_STORE = 'auracanvas_meta_model';
-
-/* ---------- stored settings (localStorage so the key survives reloads) ---------- */
-
-export function getStoredKey(): string {
-  try {
-    return (
-      localStorage.getItem(KEY_STORE) ||
-      sessionStorage.getItem('auracanvas_api_key') || // legacy location
-      ''
-    ).trim();
-  } catch { return ''; }
+export function friendlyAiName(provider: string, model = ''): string {
+  const m = (model || '').toLowerCase();
+  if (m.includes('wonder')) return 'Muse Wonder';
+  if (m.includes('ember')) return 'Muse Ember';
+  if (m.includes('spark')) return 'Muse Spark';
+  if (provider === 'gemini') return 'Gemini';
+  if (provider === 'openai') return 'GPT';
+  if (provider === 'meta' || provider === 'meta-direct' || provider === 'server') return 'Muse Spark';
+  return 'Offline';
 }
 
-export function setStoredKey(key: string): void {
-  try {
-    if (key) {
-      localStorage.setItem(KEY_STORE, key);
-      sessionStorage.removeItem('auracanvas_api_key');
-    } else {
-      localStorage.removeItem(KEY_STORE);
-      sessionStorage.removeItem('auracanvas_api_key');
+export interface ServerAiStatus {
+  mode: 'meta' | 'gemini' | 'openai' | 'local';
+  model: string;
+}
+
+let statusCache: { at: number; value: ServerAiStatus } | null = null;
+let statusFlight: Promise<ServerAiStatus> | null = null;
+const STATUS_TTL = 60000;
+
+/** Which server engine is configured — costs no tokens, never exposes the key. */
+export function getServerAiStatus(): Promise<ServerAiStatus> {
+  const now = Date.now();
+  if (statusCache && now - statusCache.at < STATUS_TTL) return Promise.resolve(statusCache.value);
+  if (statusFlight) return statusFlight;
+  statusFlight = (async (): Promise<ServerAiStatus> => {
+    try {
+      const res = await fetch('/api/agent', { method: 'GET' });
+      if (!res.ok) throw new Error('status ' + res.status);
+      const data = (await res.json()) as { mode?: string; model?: string };
+      const mode = data.mode === 'meta' || data.mode === 'gemini' || data.mode === 'openai' ? data.mode : 'local';
+      const value: ServerAiStatus = { mode, model: typeof data.model === 'string' ? data.model : '' };
+      statusCache = { at: Date.now(), value };
+      return value;
+    } catch {
+      const value: ServerAiStatus = { mode: 'local', model: '' };
+      statusCache = { at: Date.now(), value };
+      return value;
+    } finally {
+      statusFlight = null;
     }
-  } catch { /* ignore */ }
-}
-
-export function getStoredModel(): string {
-  try {
-    const m = localStorage.getItem(MODEL_STORE) || '';
-    if ((META_MODELS as readonly string[]).includes(m)) return m;
-  } catch { /* ignore */ }
-  return DEFAULT_META_MODEL;
-}
-
-export function setStoredModel(model: string): void {
-  try {
-    if ((META_MODELS as readonly string[]).includes(model)) localStorage.setItem(MODEL_STORE, model);
-  } catch { /* ignore */ }
-}
-
-export function aiModeLabel(): string {
-  if (getStoredKey()) return `Meta Muse Ready (${getStoredModel()})`;
-  return 'Offline Agent — live AI optional';
+  })();
+  return statusFlight;
 }
 
 /* ---------- Meta Muse prompt ---------- */
@@ -123,40 +120,7 @@ function extractJson(text: string): unknown {
   return null;
 }
 
-/* ---------- Meta Muse direct call (browser -> api.meta.ai, OpenAI-compatible) ---------- */
-
-async function callMetaDirect(req: AgentRequest, apiKey: string, model: string): Promise<AgentActionResponse> {
-  const controller = new AbortController();
-  const timer = window.setTimeout(() => controller.abort(), 45000);
-  try {
-    const res = await fetch(`${META_BASE_URL}/chat/completions`, {
-      method: 'POST',
-      signal: controller.signal,
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
-      body: JSON.stringify({
-        model,
-        response_format: { type: 'json_object' },
-        temperature: 0.7,
-        max_tokens: 2600,
-        messages: [
-          { role: 'system', content: SYSTEM },
-          { role: 'user', content: taskFor(req) }
-        ]
-      })
-    });
-    if (!res.ok) throw new Error(`meta ${res.status}`);
-    const data = (await res.json()) as { choices?: Array<{ message?: { content?: string } }> };
-    const text = data.choices?.[0]?.message?.content || '';
-    const parsed = extractJson(text);
-    const clean = sanitize(parsed, req.action);
-    if (!clean) throw new Error('meta bad shape');
-    return clean;
-  } finally {
-    window.clearTimeout(timer);
-  }
-}
-
-/* ---------- serverless fallback (same providers, key kept server-side) ---------- */
+/* ---------- server route (key stays server-side) + offline fallback ---------- */
 
 async function callServerless(req: AgentRequest): Promise<{ response: AgentActionResponse; provider: string }> {
   const res = await fetch('/api/agent', {
@@ -179,7 +143,7 @@ function runLocal(req: AgentRequest): AgentActionResponse {
 
 export type AgentOutcome = { response: AgentActionResponse; live: boolean; provider: string };
 
-/** Main entry: Meta Muse direct -> serverless -> offline engine. Never throws. */
+/** Main entry: server route first (uses the .env key), offline engine fallback. Never throws. */
 export async function runAgent(
   action: AgentAction,
   prompt: string,
@@ -192,45 +156,10 @@ export async function runAgent(
     mergePair: opts.mergePair,
     mode: opts.critiqueMode
   };
-  const key = getStoredKey();
-  if (key) {
-    try {
-      const response = await callMetaDirect(req, key, getStoredModel());
-      return { response, live: true, provider: 'meta-direct' };
-    } catch { /* fall through to serverless, then local */ }
-  }
   try {
     const { response, provider } = await callServerless(req);
     return { response, live: true, provider };
   } catch {
     return { response: runLocal(req), live: false, provider: 'local' };
-  }
-}
-
-/** Validate a key + model against Meta before saving. Returns null on success, error text otherwise. */
-export async function testMetaConnection(apiKey: string, model: string): Promise<string | null> {
-  try {
-    const controller = new AbortController();
-    const timer = window.setTimeout(() => controller.abort(), 25000);
-    try {
-      const res = await fetch(`${META_BASE_URL}/chat/completions`, {
-        method: 'POST',
-        signal: controller.signal,
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey.trim()}` },
-        body: JSON.stringify({
-          model,
-          max_tokens: 60,
-          messages: [{ role: 'user', content: 'Reply with the exact JSON {"ok":true}.' }]
-        })
-      });
-      if (res.status === 401 || res.status === 403) return 'Key rejected (401/403). Check the key at dev.meta.ai.';
-      if (res.status === 404) return 'Model not found (404). Try muse-spark-1.3.';
-      if (!res.ok) return `Meta API error ${res.status}. Try again in a moment.`;
-      return null;
-    } finally {
-      window.clearTimeout(timer);
-    }
-  } catch {
-    return 'Network error reaching api.meta.ai. Check connection and try again.';
   }
 }

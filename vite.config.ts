@@ -139,6 +139,18 @@ function devAgentPlugin(): Plugin {
     configureServer(server) {
       console.log(`[auracanvas-dev-agent] server keys: ${keyReport()}`);
       server.middlewares.use('/api/agent', (req, res) => {
+        if (req.method === 'GET') {
+          // Cheap status probe for the HUD badge: which engine is configured.
+          const metaKey = process.env['META_API_KEY'] || process.env['MODEL_API_KEY'] || '';
+          const metaModel = process.env['META_MODEL'] || 'muse-spark-1.3';
+          const geminiKey = process.env['GEMINI_API_KEY'] || '';
+          const openaiKey = process.env['OPENAI_API_KEY'] || '';
+          const mode = metaKey ? 'meta' : geminiKey ? 'gemini' : openaiKey ? 'openai' : 'local';
+          const model = metaKey ? metaModel : geminiKey ? 'gemini-2.5-flash' : openaiKey ? 'gpt-4o-mini' : '';
+          res.setHeader('Content-Type', 'application/json');
+          res.end(JSON.stringify({ mode, model }));
+          return;
+        }
         if (req.method !== 'POST') {
           res.statusCode = 405;
           res.setHeader('Content-Type', 'application/json');

@@ -1,7 +1,8 @@
 /** Real voice input with three tiers (no placeholders):
- *  1. Meta Muse Voice Transcribe (connected key) — works in Quest Browser,
- *     where the Web Speech API is unavailable. Push-to-talk: tap mic to
- *     record, tap again to transcribe via POST /v1/asr/transcribe.
+ *  1. Meta Muse Voice Transcribe — active only if the host app supplies a key
+ *     via setMetaKey (this app keeps keys server-side, so this tier stays off
+ *     and voice falls through below). Push-to-talk: tap mic to record, tap
+ *     again to transcribe via POST /v1/asr/transcribe.
  *  2. Web Speech API recognition (desktop Chrome/Edge, no key needed).
  *  3. Typed input fallback with an honest caption.
  * Speech output uses the device speechSynthesis engine.

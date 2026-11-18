@@ -49,40 +49,15 @@
       <div class="support-row">
         <span id="arSupport" class="support">checking AR</span>
         <span id="vrSupport" class="support">checking VR</span>
-        <span id="aiBadge" class="support ai">AI: checking</span>
-        <button id="keyBtn" class="linkbtn" title="Connect your Meta Muse API key">Connect AI</button>
+        <span id="aiBadge" class="support ai">AI · Starting…</span>
       </div>
       <div class="toggles">
         <label><input type="checkbox" id="toggleSeated" checked /> One-handed / seated friendly</label>
         <label><input type="checkbox" id="toggleCaptions" checked /> Captions always on</label>
       </div>
-      <div class="model-note">Live AI is optional. Add your Meta key here, or set <code>META_API_KEY</code> / <code>GEMINI_API_KEY</code> / <code>OPENAI_API_KEY</code> on the server. Default model <code>muse-spark-1.3</code> via <code>https://api.meta.ai/v1</code>. Your key stays in this browser only. The HUD badge always names the engine that answered.</div>
+      <div class="model-note">AI runs on the server — no setup needed. The badge above always shows which model is answering right now.</div>
     </div>
   </section>
-
-  <!-- AI settings modal -->
-  <div id="keyModal" class="modal hidden">
-    <div class="modal-card">
-      <h3>Connect Meta Muse</h3>
-      <p>Paste your Meta Model API key to enable live cloud reasoning. Stored only in this browser (localStorage). Without a key, the built-in offline agent is used.</p>
-      <label for="keyInput">Meta API key</label>
-      <input id="keyInput" type="password" placeholder="Paste MODEL_API_KEY" autocomplete="off" />
-      <label for="modelSelect">Model</label>
-      <select id="modelSelect">
-        <option value="muse-spark-1.3">muse-spark-1.3 — balanced (recommended)</option>
-        <option value="muse-wonder-1.0">muse-wonder-1.0 — most capable</option>
-        <option value="muse-ember-1.0">muse-ember-1.0 — fast / efficient</option>
-      </select>
-      <div id="keyStatus" class="key-status"></div>
-      <div class="hint">Get a key at <a href="https://dev.meta.ai" target="_blank" rel="noopener">dev.meta.ai</a> &rarr; API keys. For deployments, set <b>META_API_KEY</b> on the server instead.</div>
-      <div class="modal-row">
-        <button id="keyTest" class="cta small">Test connection</button>
-        <button id="keySave" class="cta primary small">Save</button>
-        <button id="keyClear" class="cta small">Clear</button>
-        <button id="keyClose" class="cta ghost small">Close</button>
-      </div>
-    </div>
-  </div>
 
   <!-- Desktop / in-scene HUD -->
   <div id="hud" class="hidden">

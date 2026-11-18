@@ -118,6 +118,20 @@ function sanitize(parsed: unknown): { spokenReply: string; nodes: unknown[]; con
 }
 
 export default async function handler(req: Req, res: Res): Promise<void> {
+  if (req.method === 'GET') {
+    // Cheap status probe for the HUD badge: which engine is configured.
+    // Costs no tokens and never exposes any key.
+    const metaKey = process.env['META_API_KEY'] || process.env['MODEL_API_KEY'] || '';
+    const geminiKey = process.env['GEMINI_API_KEY'] || '';
+    const openaiKey = process.env['OPENAI_API_KEY'] || '';
+    const mode = metaKey ? 'meta' : geminiKey ? 'gemini' : openaiKey ? 'openai' : 'local';
+    const model =
+      metaKey ? (process.env['META_MODEL'] || META_DEFAULT_MODEL)
+      : geminiKey ? 'gemini-2.5-flash'
+      : openaiKey ? 'gpt-4o-mini' : '';
+    res.status(200).json({ mode, model });
+    return;
+  }
   if (req.method !== 'POST') {
     res.status(405).json({ error: 'POST only' });
     return;

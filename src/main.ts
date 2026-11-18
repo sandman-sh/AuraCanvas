@@ -10,7 +10,7 @@ import { BoardPanel, type BoardPanelAction } from './xr/boardPanel';
 import { DesktopInput } from './xr/desktopInput';
 import { VoiceController } from './speech/voiceController';
 import { sound } from './audio/soundEngine';
-import { runAgent, aiModeLabel, getStoredKey, setStoredKey, getStoredModel, setStoredModel, testMetaConnection } from './ai/agentClient';
+import { runAgent, getServerAiStatus, friendlyAiName } from './ai/agentClient';
 import { PRESETS } from './ai/localAgentEngine';
 import { buildMarkdown, downloadMarkdown, copyMarkdown } from './utils/markdownExport';
 import { saveBoard, listBoards, loadBoard, deleteBoard, lastBoardId, clearLastBoard, loadSeatedPref, saveSeatedPref, storageAvailable, type SavedBoard } from './utils/boardStore';
@@ -30,7 +30,7 @@ let keyboard: XRKeyboard | null = null;
 let boardPanel: BoardPanel | null = null;
 let desktop: DesktopInput | null = null;
 const voice = new VoiceController();
-voice.setMetaKey(getStoredKey());
+voice.setMetaKey(''); // no browser key: all AI goes through the server .env key
 
 let worldReady = false;
 let onboarded = false;
@@ -251,9 +251,15 @@ export function providerLabel(p: string): string {
 }
 
 function markAi(live: boolean, provider: string): void {
-  $('aiBadge').textContent = live
-    ? `AI: ${providerLabel(provider)} (live)`
-    : (getStoredKey() ? 'AI: key not accepted — offline engine active' : `AI: ${aiModeLabel()} (offline)`);
+  $('aiBadge').textContent = live ? `AI · ${friendlyAiName(provider)}` : 'AI · Offline';
+}
+
+/** Ask the server which engine is configured and show it in plain language. */
+function refreshAiBadge(): void {
+  $('aiBadge').textContent = 'AI · Starting…';
+  void getServerAiStatus().then((s) => {
+    $('aiBadge').textContent = s.mode === 'local' ? 'AI · Offline' : `AI · ${friendlyAiName(s.mode, s.model)}`;
+  });
 }
 
 function markSaved(when = Date.now()): void {
@@ -1360,40 +1366,6 @@ function wireLanding(): void {
   $('btnDesktop').addEventListener('click', () => void launchDesktop());
   $('btnAR').addEventListener('click', () => void launchXR('immersive-ar'));
   $('btnVR').addEventListener('click', () => void launchXR('immersive-vr'));
-  $('keyBtn').addEventListener('click', () => {
-    $('keyModal').classList.remove('hidden');
-    ($('keyInput') as HTMLInputElement).value = getStoredKey();
-    ($('modelSelect') as HTMLSelectElement).value = getStoredModel();
-    const st = $('keyStatus');
-    st.textContent = '';
-    st.className = 'key-status';
-  });
-  $('keyTest').addEventListener('click', async () => {
-    const st = $('keyStatus');
-    const k = ($('keyInput') as HTMLInputElement).value.trim();
-    const m = ($('modelSelect') as HTMLSelectElement).value;
-    if (!k) { st.textContent = 'Paste a key first.'; st.className = 'key-status err'; return; }
-    st.textContent = 'Testing connection to api.meta.ai…';
-    st.className = 'key-status';
-    const err = await testMetaConnection(k, m);
-    if (!err) { st.textContent = `Connected. Model ${m} responded.`; st.className = 'key-status ok'; }
-    else { st.textContent = err; st.className = 'key-status err'; }
-  });
-  $('keyClose').addEventListener('click', () => $('keyModal').classList.add('hidden'));
-  $('keySave').addEventListener('click', () => {
-    setStoredKey(($('keyInput') as HTMLInputElement).value.trim());
-    setStoredModel(($('modelSelect') as HTMLSelectElement).value);
-    voice.setMetaKey(getStoredKey());
-    $('keyModal').classList.add('hidden');
-    $('aiBadge').textContent = 'AI: ' + aiModeLabel();
-    toast(getStoredKey() ? 'Meta Muse key saved in this browser.' : 'Key removed. Offline agent active.');
-  });
-  $('keyClear').addEventListener('click', () => {
-    setStoredKey('');
-    voice.setMetaKey('');
-    ($('keyInput') as HTMLInputElement).value = '';
-    $('aiBadge').textContent = 'AI: ' + aiModeLabel();
-  });
   $('toggleCaptions').addEventListener('change', (e) => {
     captionsOn = (e.target as HTMLInputElement).checked;
   });
@@ -1417,7 +1389,7 @@ function wireLanding(): void {
     el.textContent = s ? '● VR ready' : '○ VR not detected';
     if (s) el.classList.add('ok');
   });
-  $('aiBadge').textContent = 'AI: ' + aiModeLabel();
+  refreshAiBadge();
 }
 
 function wireHud(): void {
@@ -1490,7 +1462,7 @@ function wireHud(): void {
   $('btnHome').addEventListener('click', () => {
     $('hud').classList.add('hidden');
     $('landing').classList.remove('hidden');
-    $('aiBadge').textContent = 'AI: ' + aiModeLabel();
+    refreshAiBadge();
   });
   const pills = $('presetPills');
   PRESETS.forEach((p) => {

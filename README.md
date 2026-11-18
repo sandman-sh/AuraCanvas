@@ -21,9 +21,9 @@ Repository: https://github.com/sandman-sh/AuraCanvas.git
 - Live AI reasoning — goals become constellations, merges become synthesis
   nodes, and reviews surface blind spots, premortems, and root causes.
 - Fully automatic AI over your own `.env` key — no browser setup, no prompts,
-  no pasting keys. An optional in-app key override is available for testing.
-- Honest provider labeling — the HUD badge always names the engine that
-  answered (Meta Muse, Google Gemini, OpenAI, Server AI, or Offline engine).
+  no pasting keys, nothing to connect.
+- Honest status badge — it always shows which model is answering right now
+  (for example Muse Spark, Gemini, GPT, or Offline).
 - Offline engine — goal mapping, merges, expansions, and all three review
   lenses keep working with no network at all.
 - Board management — auto-save on every change including each orb's position,
@@ -37,21 +37,15 @@ Repository: https://github.com/sandman-sh/AuraCanvas.git
 
 ## How the AI works
 
-Every agent call (generate, merge, expand, review) flows through the same
-chain, and the first tier that returns usable nodes wins:
+Every agent call (generate, merge, expand, review) goes to the server route
+`/api/agent`, which tries Meta, then Gemini, then OpenAI using the keys from
+the server environment. The first tier that returns usable nodes wins. There
+is no key UI anywhere in the app — the browser never sees, stores, or sends
+any API key.
 
-1. Browser Meta key (optional) — if you set one via Connect AI, the app calls
-   `api.meta.ai` directly. Stored in `localStorage` only.
-2. Server route `/api/agent` — uses `META_API_KEY`, then `GEMINI_API_KEY`,
-   then `OPENAI_API_KEY` from the server environment. This is the default
-   path: with your key in `.env`, everything is live and nobody is ever asked
-   for a key.
-3. Offline engine — a local goal parser that maps your words into goal,
-   strategy, product, growth, and risk nodes. Always available, clearly
-   labeled as the Offline engine.
-
-Empty or malformed provider responses fall through to the next tier, so an
-agent call never fails visibly — worst case, the offline engine answers.
+If no server key is set, or every provider fails, the offline engine answers
+instead: a local goal parser that maps your words into goal, strategy,
+product, growth, and risk nodes. The badge simply reads Offline in that case.
 
 ## Quick start
 
@@ -80,9 +74,7 @@ npm run build    # typecheck + production build -> dist/
 ```
 
 With `META_API_KEY` set, all AI features work immediately — the app never
-asks you for a key. The Connect AI button on the landing page is purely an
-optional override (for example, to try a different key or model without
-editing `.env`).
+asks you for a key, and there is no key screen to connect.
 
 ## Verify the AI end to end
 
@@ -180,8 +172,8 @@ docs/banner.svg         README banner
   terminal shows which keys loaded and why a provider fell through.
 - Save failed — browser storage is unavailable (private mode, quota). Boards
   stay in memory; Export still works. Free space or leave private mode.
-- Mic unavailable — Quest Browser has no Web Speech API. Connect a Meta key
-  for transcription, or poke-type with the ABC keyboard.
+- Mic unavailable — Quest Browser has no Web Speech API, so dictate on a
+  desktop browser or poke-type with the ABC keyboard in-headset.
 - Session blocked — use the Immersive Web Emulator extension or Desktop 3D.
   `localhost` is a secure context, so XR works there.
 - Key rejected (401/403) — check the key at dev.meta.ai. Model not found
@@ -190,8 +182,9 @@ docs/banner.svg         README banner
 ## Security and privacy
 
 - `.env` is git-ignored (see `.gitignore`) — keys never enter the repo.
-- The optional browser key lives in `localStorage` on your device only and is
-  sent solely to `api.meta.ai`.
+- No keys in the browser: the app never stores, shows, or sends an API key
+  from the frontend — every AI call goes through the server, which reads
+  `.env` (local dev) or the hosting provider's environment (deployed).
 - Boards save to the device's `localStorage`. Nothing leaves the device
   except agent requests to the configured provider.
 
