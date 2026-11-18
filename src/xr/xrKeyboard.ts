@@ -4,24 +4,80 @@ export type KeyboardMode = 'goal' | 'title' | 'summary' | 'rename' | 'bullet';
 
 const ROWS = ['QWERTYUIOP', 'ASDFGHJKL', 'ZXCVBNM'];
 
-function keyTexture(label: string, accent = false): THREE.CanvasTexture {
+/** Key cap dimensions (world units): larger caps, real gaps, visible depth. */
+const KEY_W = 0.072;
+const KEY_H = 0.068;
+const KEY_GAP = 0.012;
+const KEY_PITCH = KEY_W + KEY_GAP;
+const KEY_D = 0.02;
+
+/** Key side/backing color: dark slate edges give every key real 3D thickness. */
+const KEY_EDGE = 0x2a3a5f;
+
+function keyFaceTexture(label: string, aspect: number, accent = false): { tex: THREE.CanvasTexture; flash: THREE.CanvasTexture } {
+  const W = Math.max(160, Math.round(160 * aspect));
+  const H = 160;
   const c = document.createElement('canvas');
-  c.width = 128; c.height = 128;
+  c.width = W; c.height = H;
   const ctx = c.getContext('2d')!;
-  ctx.fillStyle = accent ? '#0071e3' : 'rgba(255,255,255,0.96)';
-  ctx.strokeStyle = accent ? '#0071e3' : 'rgba(0,113,227,0.35)';
-  ctx.lineWidth = 5;
+  // Subtle vertical gradient so the face reads as a formed cap, not a sticker.
+  const g = ctx.createLinearGradient(0, 0, 0, H);
+  if (accent) { g.addColorStop(0, '#2f8fff'); g.addColorStop(1, '#0063d1'); }
+  else { g.addColorStop(0, '#ffffff'); g.addColorStop(1, '#e6ebf4'); }
+  ctx.fillStyle = g;
+  ctx.strokeStyle = accent ? 'rgba(0,80,180,0.9)' : 'rgba(0,113,227,0.55)';
+  ctx.lineWidth = Math.max(6, W * 0.012);
   ctx.beginPath();
-  ctx.roundRect(6, 6, 116, 116, 26);
+  ctx.roundRect(8, 8, W - 16, H - 16, 30);
   ctx.fill();
   ctx.stroke();
   ctx.fillStyle = accent ? '#fff' : '#1d1d1f';
-  ctx.font = '700 56px Inter, system-ui, sans-serif';
+  ctx.font = `700 ${label.length > 3 ? 58 : 72}px Inter, system-ui, sans-serif`;
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  ctx.fillText(label, 64, 68);
+  ctx.fillText(label, W / 2, H / 2 + 4);
   const tex = new THREE.CanvasTexture(c);
   tex.colorSpace = THREE.SRGBColorSpace;
+  tex.anisotropy = 4;
+  // Pressed/flash variant: same layout, tinted blue — swapped in on dwell fire.
+  const fc = document.createElement('canvas');
+  fc.width = W; fc.height = H;
+  const fx = fc.getContext('2d')!;
+  const fg = fx.createLinearGradient(0, 0, 0, H);
+  fg.addColorStop(0, '#4da3ff'); fg.addColorStop(1, '#0a68d1');
+  fx.fillStyle = fg;
+  fx.beginPath();
+  fx.roundRect(8, 8, W - 16, H - 16, 30);
+  fx.fill();
+  fx.fillStyle = '#fff';
+  fx.font = `700 ${label.length > 3 ? 58 : 72}px Inter, system-ui, sans-serif`;
+  fx.textAlign = 'center'; fx.textBaseline = 'middle';
+  fx.fillText(label, W / 2, H / 2 + 4);
+  const flash = new THREE.CanvasTexture(fc);
+  flash.colorSpace = THREE.SRGBColorSpace;
+  flash.anisotropy = 4;
+  return { tex, flash };
+}
+
+/** Frosted container so the panel reads as one floating instrument. */
+function panelTexture(): THREE.CanvasTexture {
+  const W = 1024, H = 832;
+  const c = document.createElement('canvas');
+  c.width = W; c.height = H;
+  const ctx = c.getContext('2d')!;
+  const g = ctx.createLinearGradient(0, 0, 0, H);
+  g.addColorStop(0, 'rgba(255,255,255,0.34)');
+  g.addColorStop(1, 'rgba(226,232,244,0.26)');
+  ctx.fillStyle = g;
+  ctx.strokeStyle = 'rgba(0,113,227,0.5)';
+  ctx.lineWidth = 8;
+  ctx.beginPath();
+  ctx.roundRect(10, 10, W - 20, H - 20, 64);
+  ctx.fill();
+  ctx.stroke();
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.anisotropy = 4;
   return tex;
 }
 
@@ -58,23 +114,42 @@ export class XRKeyboard {
   }
 
   private addKey(label: string, x: number, y: number, w: number, action: string, accent = false): void {
-    const mat = new THREE.MeshBasicMaterial({ map: keyTexture(label, accent), transparent: true });
-    const m = new THREE.Mesh(new THREE.BoxGeometry(w, 0.062, 0.012), mat);
+    const h = KEY_H;
+    const { tex, flash } = keyFaceTexture(label, w / h, accent);
+    const face = new THREE.MeshBasicMaterial({ map: tex, transparent: true });
+    const edge = new THREE.MeshBasicMaterial({ color: KEY_EDGE });
+    // Thick capped key: textured face, dark slate sides — reads as a real
+    // button at grazing angles instead of a smeared sticker.
+    const m = new THREE.Mesh(
+      new THREE.BoxGeometry(w, h, KEY_D),
+      [edge, edge, edge, edge, face, edge]
+    );
     m.position.set(x, y, 0);
     m.userData.keyAction = action;
     m.userData.keyLabel = label;
+    m.userData.faceTex = tex;
+    m.userData.flashTex = flash;
     this.group.add(m);
     this.keys.push(m);
     this.flash.set(action + '|' + label, 0);
   }
 
+  /** Swap a key's face to its pressed variant (or back). */
+  private setKeyFace(key: THREE.Mesh, pressed: boolean): void {
+    const mats = key.material as THREE.MeshBasicMaterial[];
+    const face = mats[4];
+    if (!face) return;
+    const next = (pressed ? key.userData.flashTex : key.userData.faceTex) as THREE.Texture | undefined;
+    if (next && face.map !== next) { face.map = next; face.needsUpdate = true; }
+  }
+
   private build(): void {
-    // backdrop
+    // Frosted container backing — the panel reads as one floating instrument.
     const bg = new THREE.Mesh(
-      new THREE.PlaneGeometry(0.78, 0.62),
-      new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.16, depthWrite: false })
+      new THREE.PlaneGeometry(0.86, 0.70),
+      new THREE.MeshBasicMaterial({ map: panelTexture(), transparent: true, depthWrite: false })
     );
-    bg.position.z = -0.012;
+    bg.position.z = -0.016;
     this.group.add(bg);
 
     this.titleCanvas = document.createElement('canvas');
@@ -82,10 +157,10 @@ export class XRKeyboard {
     this.titleTex = new THREE.CanvasTexture(this.titleCanvas);
     this.titleTex.colorSpace = THREE.SRGBColorSpace;
     this.titleMesh = new THREE.Mesh(
-      new THREE.PlaneGeometry(0.72, 0.068),
+      new THREE.PlaneGeometry(0.78, 0.072),
       new THREE.MeshBasicMaterial({ map: this.titleTex, transparent: true, depthWrite: false })
     );
-    this.titleMesh.position.y = 0.27;
+    this.titleMesh.position.y = 0.272;
     this.group.add(this.titleMesh);
 
     this.displayCanvas = document.createElement('canvas');
@@ -93,28 +168,27 @@ export class XRKeyboard {
     this.displayTex = new THREE.CanvasTexture(this.displayCanvas);
     this.displayTex.colorSpace = THREE.SRGBColorSpace;
     this.display = new THREE.Mesh(
-      new THREE.PlaneGeometry(0.72, 0.09),
+      new THREE.PlaneGeometry(0.78, 0.095),
       new THREE.MeshBasicMaterial({ map: this.displayTex, transparent: true, depthWrite: false })
     );
-    this.display.position.y = 0.185;
+    this.display.position.y = 0.177;
     this.group.add(this.display);
 
-    const kw = 0.068, gap = 0.008;
     ROWS.forEach((row, r) => {
-      const y = 0.08 - r * 0.075;
-      const totalW = row.length * (kw + gap);
+      const y = 0.081 - r * 0.084;
+      const totalW = row.length * KEY_PITCH - KEY_GAP;
       [...row].forEach((ch, i) => {
-        this.addKey(ch, -totalW / 2 + (kw + gap) / 2 + i * (kw + gap), y, kw, 'char');
+        this.addKey(ch, -totalW / 2 + KEY_PITCH / 2 + i * KEY_PITCH, y, KEY_W, 'char');
       });
     });
     // bottom row: space + backspace
-    this.addKey('SPACE', -0.1, -0.15, 0.34, 'space');
-    this.addKey('<X', 0.19, -0.15, 0.16, 'back');
-    this.addKey('CLR', 0.325, -0.15, 0.1, 'clear');
+    this.addKey('SPACE', -0.14, -0.171, 0.36, 'space');
+    this.addKey('<X', 0.155, -0.171, 0.16, 'back');
+    this.addKey('CLR', 0.30, -0.171, 0.11, 'clear');
     // action row
-    this.addKey('GO', -0.19, -0.23, 0.22, 'submit', true);
-    this.addKey('PRESET', 0.03, -0.23, 0.2, 'preset');
-    this.addKey('CLOSE', 0.26, -0.23, 0.2, 'close');
+    this.addKey('GO', -0.23, -0.257, 0.24, 'submit', true);
+    this.addKey('PRESET', 0.02, -0.257, 0.20, 'preset');
+    this.addKey('CLOSE', 0.26, -0.257, 0.20, 'close');
     this.redraw();
   }
 
@@ -224,7 +298,7 @@ export class XRKeyboard {
     for (const key of this.keys) {
       const kp = new THREE.Vector3();
       key.getWorldPosition(kp);
-      if (kp.distanceTo(p) > 0.045) continue;
+      if (kp.distanceTo(p) > 0.05) continue;
       const id = (key.userData.keyAction as string) + '|' + (key.userData.keyLabel as string);
       if (!press) {
         // hover highlight only
@@ -234,7 +308,8 @@ export class XRKeyboard {
       if (now - (this.lastHit.get(id) || 0) < 450) return null;
       this.lastHit.set(id, now);
       key.scale.setScalar(1.25);
-      window.setTimeout(() => key.scale.setScalar(1), 140);
+      this.setKeyFace(key, true);
+      window.setTimeout(() => { key.scale.setScalar(1); this.setKeyFace(key, false); }, 140);
       click();
       const action = key.userData.keyAction as string;
       if (action === 'char') this.buffer = (this.buffer + (key.userData.keyLabel as string)).slice(0, 120);

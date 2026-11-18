@@ -955,7 +955,7 @@ function keyboardDwell(p: THREE.Vector3, hi: number, dt: number, onTick: () => v
 function keyboardHover(p: THREE.Vector3): string | null {
   if (!keyboard || !keyboard.visible) return null;
   let best: string | null = null;
-  let bd = 0.045;
+  let bd = 0.05;
   const tmp = new THREE.Vector3();
   for (const key of keyboard.keys) {
     key.getWorldPosition(tmp);
